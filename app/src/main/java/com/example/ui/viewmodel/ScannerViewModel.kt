@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.ErrorLogEntity
 import com.example.data.local.ScannerSettings
+import com.example.data.local.SignalHistoryEntity
 import com.example.data.repository.ScannerRepository
 import com.example.domain.math.MytTimeUtils
 import com.example.domain.model.CoinScanUiModel
@@ -55,6 +56,9 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     val apiTestResult: StateFlow<Pair<Boolean, String>?> = _apiTestResult.asStateFlow()
 
     val errorLogs: StateFlow<List<ErrorLogEntity>> = repository.errorLogsFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val signalHistory: StateFlow<List<SignalHistoryEntity>> = repository.signalHistoryFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val settingsFlow: StateFlow<ScannerSettings> = repository.settingsFlow
@@ -212,6 +216,24 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     fun clearLogs() {
         viewModelScope.launch {
             repository.clearLogs()
+        }
+    }
+
+    fun updateSignalOutcome(id: Long, outcomeStatus: String) {
+        viewModelScope.launch {
+            repository.updateSignalOutcome(id, outcomeStatus)
+        }
+    }
+
+    fun deleteSignal(id: Long) {
+        viewModelScope.launch {
+            repository.deleteSignal(id)
+        }
+    }
+
+    fun clearSignalHistory() {
+        viewModelScope.launch {
+            repository.clearSignalHistory()
         }
     }
 

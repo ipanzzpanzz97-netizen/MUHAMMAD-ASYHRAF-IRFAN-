@@ -86,42 +86,68 @@ class GlobalMarketApiService(
         }
 
     /**
-     * Public Binance OHLCV fallback scaled to MYR using live Luno/USD conversion factor
-     * when Luno /api/exchange/1/candles requires API auth.
+     * Fetches public Binance OHLCV candles (/api/v3/klines without API key)
+     * with automatic fallback to Binance Vision public data mirror, scaled dynamically to Luno MYR.
      */
     suspend fun fetchBinanceCandlesScaledToMyr(
         binanceSymbol: String,
         interval: String,
-        myrPerUsdFactor: Double,
+        lunoLastPriceMyr: Double,
+        fallbackMyrPerUsd: Double = 4.45,
         limit: Int = 250
     ): List<CandlePoint> = withContext(Dispatchers.IO) {
-        val url = "https://api.binance.com/api/v3/klines?symbol=$binanceSymbol&interval=$interval&limit=$limit"
-        val request = Request.Builder()
-            .url(url)
-            .header("Accept", "application/json")
-            .build()
+        val hosts = listOf(
+            "https://api.binance.com",
+            "https://data-api.binance.vision"
+        )
+        var lastError: Throwable? = null
 
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                throw IllegalStateException("Binance Klines $binanceSymbol HTTP ${response.code}")
+        for (baseUrl in hosts) {
+            val url = "$baseUrl/api/v3/klines?symbol=$binanceSymbol&interval=$interval&limit=$limit"
+            val request = Request.Builder()
+                .url(url)
+                .header("Accept", "application/json")
+                .header("User-Agent", "LunoIntelAIScanner/1.0")
+                .build()
+
+            try {
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        throw IllegalStateException("Binance Klines $binanceSymbol HTTP ${response.code}")
+                    }
+                    val arr = JSONArray(response.body?.string().orEmpty())
+                    if (arr.length() == 0) {
+                        throw IllegalStateException("Binance Klines $binanceSymbol kosong")
+                    }
+                    val latestBinanceClose = arr.optJSONArray(arr.length() - 1)
+                        ?.optString(4, "0")?.toDoubleOrNull() ?: 0.0
+                    val scale = when {
+                        lunoLastPriceMyr > 0.0 && latestBinanceClose > 0.0 ->
+                            lunoLastPriceMyr / latestBinanceClose
+                        fallbackMyrPerUsd > 0.0 -> fallbackMyrPerUsd
+                        else -> 4.45
+                    }
+
+                    val list = ArrayList<CandlePoint>(arr.length())
+                    for (i in 0 until arr.length()) {
+                        val k = arr.optJSONArray(i) ?: continue
+                        list.add(
+                            CandlePoint(
+                                timestampMs = k.optLong(0, 0L),
+                                open = (k.optString(1, "0").toDoubleOrNull() ?: 0.0) * scale,
+                                high = (k.optString(2, "0").toDoubleOrNull() ?: 0.0) * scale,
+                                low = (k.optString(3, "0").toDoubleOrNull() ?: 0.0) * scale,
+                                close = (k.optString(4, "0").toDoubleOrNull() ?: 0.0) * scale,
+                                volume = k.optString(5, "0").toDoubleOrNull() ?: 0.0
+                            )
+                        )
+                    }
+                    return@withContext list
+                }
+            } catch (t: Throwable) {
+                lastError = t
             }
-            val arr = JSONArray(response.body?.string().orEmpty())
-            val scale = if (myrPerUsdFactor > 0.0) myrPerUsdFactor else 4.45
-            val list = ArrayList<CandlePoint>(arr.length())
-            for (i in 0 until arr.length()) {
-                val k = arr.optJSONArray(i) ?: continue
-                list.add(
-                    CandlePoint(
-                        timestampMs = k.optLong(0, 0L),
-                        open = (k.optString(1, "0").toDoubleOrNull() ?: 0.0) * scale,
-                        high = (k.optString(2, "0").toDoubleOrNull() ?: 0.0) * scale,
-                        low = (k.optString(3, "0").toDoubleOrNull() ?: 0.0) * scale,
-                        close = (k.optString(4, "0").toDoubleOrNull() ?: 0.0) * scale,
-                        volume = k.optString(5, "0").toDoubleOrNull() ?: 0.0
-                    )
-                )
-            }
-            list
         }
+        throw (lastError ?: IllegalStateException("Gagal tarik lilin Binance untuk $binanceSymbol"))
     }
 }

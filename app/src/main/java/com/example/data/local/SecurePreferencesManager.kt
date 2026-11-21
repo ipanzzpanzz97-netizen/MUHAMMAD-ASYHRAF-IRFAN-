@@ -11,8 +11,17 @@ import kotlinx.coroutines.flow.asStateFlow
 enum class ApiProviderPreset(
     val label: String,
     val defaultBaseUrl: String,
-    val defaultModel: String
+    val defaultModel: String,
+    val defaultFallbackModel: String = "gemini-4-argon",
+    val defaultFallbackUrl: String = ""
 ) {
+    DATTIO_AI(
+        label = "Dattio AI",
+        defaultBaseUrl = "https://api.dattio.ai/v1/chat/completions",
+        defaultModel = "deepseek-v4.1-flash-1017-mod",
+        defaultFallbackModel = "gemini-4-argon",
+        defaultFallbackUrl = "https://api.dattio.ai/v1/chat/completions"
+    ),
     DEEPSEEK(
         label = "DeepSeek",
         defaultBaseUrl = "https://api.deepseek.com/v1/chat/completions",
@@ -41,7 +50,7 @@ enum class ApiProviderPreset(
 }
 
 data class ScannerSettings(
-    val primaryProvider: String = ApiProviderPreset.DEEPSEEK.name,
+    val primaryProvider: String = ApiProviderPreset.DATTIO_AI.name,
     val primaryApiKey: String = "",
     val primaryModel: String = DEFAULT_PRIMARY_MODEL,
     val primaryEndpoint: String = DEFAULT_PRIMARY_ENDPOINT,
@@ -59,16 +68,9 @@ data class ScannerSettings(
 ) {
     companion object {
         const val DEFAULT_PRIMARY_MODEL = "deepseek-v4.1-flash-1017-mod"
-        const val DEFAULT_PRIMARY_ENDPOINT = "https://api.deepseek.com/v1/chat/completions"
+        const val DEFAULT_PRIMARY_ENDPOINT = "https://api.dattio.ai/v1/chat/completions"
         const val DEFAULT_FALLBACK_MODEL = "gemini-4-argon"
-        const val DEFAULT_FALLBACK_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-
-        val AVAILABLE_FALLBACK_MODELS = listOf(
-            "gemini-4-argon",
-            "gemini-2.5-flash",
-            "deepseek-chat",
-            "deepseek-reasoner"
-        )
+        const val DEFAULT_FALLBACK_ENDPOINT = "https://api.dattio.ai/v1/chat/completions"
     }
 }
 
@@ -104,8 +106,8 @@ class SecurePreferencesManager(context: Context) {
 
     private fun loadSettings(): ScannerSettings {
         return ScannerSettings(
-            primaryProvider = configPrefs.getString(KEY_PRIMARY_PROVIDER, ApiProviderPreset.DEEPSEEK.name)
-                ?: ApiProviderPreset.DEEPSEEK.name,
+            primaryProvider = configPrefs.getString(KEY_PRIMARY_PROVIDER, ApiProviderPreset.DATTIO_AI.name)
+                ?: ApiProviderPreset.DATTIO_AI.name,
             primaryApiKey = secretPrefs.getString(KEY_PRIMARY_API, "") ?: "",
             primaryModel = configPrefs.getString(KEY_PRIMARY_MODEL, ScannerSettings.DEFAULT_PRIMARY_MODEL)
                 ?: ScannerSettings.DEFAULT_PRIMARY_MODEL,

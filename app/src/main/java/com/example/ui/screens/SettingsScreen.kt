@@ -1,7 +1,12 @@
 package com.example.ui.screens
 
 import android.Manifest
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -28,6 +33,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.ErrorOutline
@@ -132,6 +138,9 @@ fun SettingsScreen(
     var showLunoSection by remember { mutableStateOf(false) }
     var savedBanner by remember { mutableStateOf(false) }
     var hasNotifPerm by remember { mutableStateOf(NotificationHelper.hasNotificationPermission(context)) }
+    var isIgnoringBattery by remember {
+        mutableStateOf(isBatteryOptimizationIgnored(context))
+    }
 
     LaunchedEffect(settings) {
         primaryProvider = settings.primaryProvider
@@ -245,6 +254,11 @@ fun SettingsScreen(
                                         if (preset != ApiProviderPreset.CUSTOM) {
                                             primaryEndpoint = preset.defaultBaseUrl
                                             primaryModel = preset.defaultModel
+                                            if (preset == ApiProviderPreset.DATTIO_AI) {
+                                                fallbackProvider = ApiProviderPreset.DATTIO_AI.name
+                                                fallbackModel = preset.defaultFallbackModel
+                                                fallbackEndpoint = preset.defaultFallbackUrl
+                                            }
                                         }
                                         savedBanner = false
                                     },
@@ -675,20 +689,109 @@ fun SettingsScreen(
                             )
                         }
 
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasNotifPerm) {
-                            OutlinedButton(
-                                onClick = {
-                                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                                },
-                                border = BorderStroke(1.dp, ObsidianBorder),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(min = 48.dp)
-                                    .testTag("request_notification_permission_button")
+                        Surface(
+                            color = ObsidianSurface,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, ObsidianBorder),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                Icon(Icons.Filled.NotificationsActive, contentDescription = null, tint = CyberCyanBright)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Benarkan Notifikasi", color = TextPrimary)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Kebenaran Notifikasi (Android 13+)",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = TextPrimary
+                                    )
+                                    Surface(
+                                        color = if (hasNotifPerm) EmeraldTint else AmberTint,
+                                        shape = RoundedCornerShape(6.dp)
+                                    ) {
+                                        Text(
+                                            text = if (hasNotifPerm) "Dibenarkan" else "Belum Aktif",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (hasNotifPerm) EmeraldBright else AmberBright,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                }
+
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasNotifPerm) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                        },
+                                        border = BorderStroke(1.dp, CyberCyan),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(min = 48.dp)
+                                            .testTag("request_notification_permission_button")
+                                    ) {
+                                        Icon(Icons.Filled.NotificationsActive, contentDescription = null, tint = CyberCyanBright)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Benarkan Notifikasi", color = CyberCyanBright)
+                                    }
+                                }
+
+                                HorizontalDivider(color = ObsidianBorder)
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                        Text(
+                                            text = "Pengoptimuman Bateri Latar Belakang",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            color = TextPrimary
+                                        )
+                                        Text(
+                                            text = "Elakkan sistem Android mematikan jadual imbasan WorkManager di latar belakang.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = TextSecondary
+                                        )
+                                    }
+                                    Surface(
+                                        color = if (isIgnoringBattery) EmeraldTint else AmberTint,
+                                        shape = RoundedCornerShape(6.dp)
+                                    ) {
+                                        Text(
+                                            text = if (isIgnoringBattery) "Diabaikan" else "Terhad",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (isIgnoringBattery) EmeraldBright else AmberBright,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                }
+
+                                OutlinedButton(
+                                    onClick = {
+                                        openBatteryOptimizationSettings(context)
+                                        isIgnoringBattery = isBatteryOptimizationIgnored(context)
+                                    },
+                                    border = BorderStroke(1.dp, ObsidianBorder),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 48.dp)
+                                        .testTag("battery_optimization_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.BatteryChargingFull,
+                                        contentDescription = null,
+                                        tint = EmeraldBright
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Abai Pengoptimuman Bateri", color = TextPrimary)
+                                }
                             }
                         }
                     }
@@ -806,3 +909,31 @@ private fun textFieldColors() = OutlinedTextFieldDefaults.colors(
     focusedLabelColor = CyberCyanBright,
     unfocusedLabelColor = TextSecondary
 )
+
+private fun isBatteryOptimizationIgnored(context: Context): Boolean {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+        pm?.isIgnoringBatteryOptimizations(context.packageName) == true
+    } else {
+        true
+    }
+}
+
+private fun openBatteryOptimizationSettings(context: Context) {
+    val batteryIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+    } else {
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.fromParts("package", context.packageName, null)
+        }
+    }
+    runCatching {
+        context.startActivity(batteryIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }.onFailure {
+        val fallback = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.fromParts("package", context.packageName, null)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        runCatching { context.startActivity(fallback) }
+    }
+}

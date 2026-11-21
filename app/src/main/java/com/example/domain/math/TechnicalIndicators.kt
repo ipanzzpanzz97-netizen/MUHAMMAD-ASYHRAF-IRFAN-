@@ -157,9 +157,13 @@ object TechnicalIndicators {
         val ema50_4h = calculateEma(closes4h, 50)
         val atr1hPct = calculateAtrPct(closed1h, 14)
         val priceChange1hPct = calculatePriceChange1hPct(closed1h, lastPriceMyr)
-        val change24hPct = if (closes1h.size >= 24 && closes1h[closes1h.size - 24] > 0.0) {
-            ((lastPriceMyr - closes1h[closes1h.size - 24]) / closes1h[closes1h.size - 24]) * 100.0
-        } else 0.0
+        val change24hPct = when {
+            closes1h.size >= 24 && closes1h[closes1h.size - 24] > 0.0 ->
+                ((lastPriceMyr - closes1h[closes1h.size - 24]) / closes1h[closes1h.size - 24]) * 100.0
+            closes1h.size >= 2 && closes1h.first() > 0.0 ->
+                ((lastPriceMyr - closes1h.first()) / closes1h.first()) * 100.0
+            else -> 0.0
+        }
         val myrPremiumPct = calculateMyrPremiumPct(lastPriceMyr, globalPriceMyr)
 
         val vetoReasons = mutableListOf<String>()

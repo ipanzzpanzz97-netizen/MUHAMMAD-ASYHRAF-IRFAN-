@@ -7,6 +7,7 @@ import com.example.data.local.ErrorLogEntity
 import com.example.data.local.MacroSnapshotEntity
 import com.example.data.local.ScannerSettings
 import com.example.data.local.SecurePreferencesManager
+import com.example.data.local.SignalHistoryEntity
 import com.example.data.notifications.NotificationHelper
 import com.example.data.remote.CoinGeckoGlobalPrice
 import com.example.data.remote.GlobalMarketApiService
@@ -124,8 +125,22 @@ class ScannerRepository(
 
     val errorLogsFlow: Flow<List<ErrorLogEntity>> = dao.observeErrorLogs()
 
+    val signalHistoryFlow: Flow<List<SignalHistoryEntity>> = dao.observeSignalHistory()
+
     suspend fun clearLogs() {
         dao.clearErrorLogs()
+    }
+
+    suspend fun updateSignalOutcome(id: Long, outcomeStatus: String) {
+        dao.updateSignalOutcome(id, outcomeStatus)
+    }
+
+    suspend fun deleteSignal(id: Long) {
+        dao.deleteSignalById(id)
+    }
+
+    suspend fun clearSignalHistory() {
+        dao.clearSignalHistory()
     }
 
     suspend fun testApiConnection(
@@ -315,34 +330,83 @@ class ScannerRepository(
         val globalUsd = globalPrice?.usdPrice?.takeIf { it > 0.0 } ?: (lastPrice / 4.45)
         val myrPerUsd = if (globalUsd > 0.0 && lastPrice > 0.0) lastPrice / globalUsd else 4.45
 
-        // Fetch 1H and 4H candles (Luno primary -> Binance scaled to MYR fallback if Luno requires auth)
-        var candleSource = "Luno Exchange 1H/4H"
-        val candles1h = runCatching {
-            lunoApi.fetchLunoCandles(
-                pair = pairInfo.lunoPair,
-                sinceMs = nowMs - (240L * 3_600_000L),
-                durationSeconds = 3600,
-                lunoKeyId = settings.lunoKeyId,
-                lunoKeySecret = settings.lunoKeySecret
-            )
-        }.getOrElse {
-            candleSource = "Binance OHLC (Skala MYR)"
+        // Requirement 1: If Luno Read-Only keys are blank or /candles fails, pull 1H & 4H candles directly from Binance Public API (/api/v3/klines without key)
+        val hasLunoAuth = settings.lunoKeyId.isNotBlank() && settings.lunoKeySecret.isNotBlank()
+        var candleSource = "Binance Public API (1H/4H)"
+
+        val candles1h = if (hasLunoAuth) {
             runCatching {
-                globalApi.fetchBinanceCandlesScaledToMyr(pairInfo.binanceSymbol, "1h", myrPerUsd, 250)
-            }.getOrElse { emptyList() }
+                val luno1h = lunoApi.fetchLunoCandles(
+                    pair = pairInfo.lunoPair,
+                    sinceMs = nowMs - (240L * 3_600_000L),
+                    durationSeconds = 3600,
+                    lunoKeyId = settings.lunoKeyId,
+                    lunoKeySecret = settings.lunoKeySecret
+                )
+                if (luno1h.size < 25) throw IllegalStateException("Lilin Luno < 25")
+                candleSource = "Luno Exchange 1H/4H"
+                luno1h
+            }.getOrElse {
+                candleSource = "Binance Public API (1H/4H)"
+                runCatching {
+                    globalApi.fetchBinanceCandlesScaledToMyr(
+                        binanceSymbol = pairInfo.binanceSymbol,
+                        interval = "1h",
+                        lunoLastPriceMyr = lastPrice,
+                        fallbackMyrPerUsd = myrPerUsd,
+                        limit = 250
+                    )
+                }.getOrElse { err ->
+                    logEvent("ERROR", pairInfo.lunoPair, "Gagal tarik lilin 1H Binance: ${err.message}")
+                    emptyList()
+                }
+            }
+        } else {
+            runCatching {
+                globalApi.fetchBinanceCandlesScaledToMyr(
+                    binanceSymbol = pairInfo.binanceSymbol,
+                    interval = "1h",
+                    lunoLastPriceMyr = lastPrice,
+                    fallbackMyrPerUsd = myrPerUsd,
+                    limit = 250
+                )
+            }.getOrElse { err ->
+                logEvent("ERROR", pairInfo.lunoPair, "Gagal tarik lilin 1H Binance: ${err.message}")
+                emptyList()
+            }
         }
 
-        val candles4h = runCatching {
-            lunoApi.fetchLunoCandles(
-                pair = pairInfo.lunoPair,
-                sinceMs = nowMs - (240L * 14_400_000L),
-                durationSeconds = 14400,
-                lunoKeyId = settings.lunoKeyId,
-                lunoKeySecret = settings.lunoKeySecret
-            )
-        }.getOrElse {
+        val candles4h = if (hasLunoAuth && candleSource.startsWith("Luno")) {
             runCatching {
-                globalApi.fetchBinanceCandlesScaledToMyr(pairInfo.binanceSymbol, "4h", myrPerUsd, 150)
+                val luno4h = lunoApi.fetchLunoCandles(
+                    pair = pairInfo.lunoPair,
+                    sinceMs = nowMs - (240L * 14_400_000L),
+                    durationSeconds = 14400,
+                    lunoKeyId = settings.lunoKeyId,
+                    lunoKeySecret = settings.lunoKeySecret
+                )
+                if (luno4h.size < 20) throw IllegalStateException("Lilin 4H Luno < 20")
+                luno4h
+            }.getOrElse {
+                runCatching {
+                    globalApi.fetchBinanceCandlesScaledToMyr(
+                        binanceSymbol = pairInfo.binanceSymbol,
+                        interval = "4h",
+                        lunoLastPriceMyr = lastPrice,
+                        fallbackMyrPerUsd = myrPerUsd,
+                        limit = 150
+                    )
+                }.getOrElse { emptyList() }
+            }
+        } else {
+            runCatching {
+                globalApi.fetchBinanceCandlesScaledToMyr(
+                    binanceSymbol = pairInfo.binanceSymbol,
+                    interval = "4h",
+                    lunoLastPriceMyr = lastPrice,
+                    fallbackMyrPerUsd = myrPerUsd,
+                    limit = 150
+                )
             }.getOrElse { emptyList() }
         }
 
@@ -412,6 +476,48 @@ class ScannerRepository(
             updatedAtMs = nowMs
         )
         dao.upsertCoinScan(entity)
+
+        // Auto-evaluate open signal history entries against live Luno MYR price for winrate tracking
+        val openSignals = dao.getOpenSignalsForPair(pairInfo.lunoPair)
+        for (sig in openSignals) {
+            when {
+                sig.tp2Myr > 0.0 && lastPrice >= sig.tp2Myr ->
+                    dao.updateSignalOutcome(sig.id, "WIN_TP2")
+                sig.tp1Myr > 0.0 && lastPrice >= sig.tp1Myr ->
+                    dao.updateSignalOutcome(sig.id, "WIN_TP1")
+                sig.stopLossMyr > 0.0 && lastPrice <= sig.stopLossMyr ->
+                    dao.updateSignalOutcome(sig.id, "LOSS_SL")
+            }
+        }
+
+        // Requirement 4: Record every STRONG_WATCH_BUY alert locally with Entry, SL, TP1, TP2
+        val levels = analysis.levels
+        if (analysis.action == "STRONG_WATCH_BUY" && levels != null) {
+            val latestSig = dao.getLatestSignalForPair(pairInfo.lunoPair)
+            val isDuplicateRecent = latestSig != null &&
+                (nowMs - latestSig.triggeredAtMs) < 60 * 60_000L &&
+                latestSig.entryZoneMyr == levels.entryZoneMyr
+            if (!isDuplicateRecent) {
+                dao.insertSignalHistory(
+                    SignalHistoryEntity(
+                        pair = pairInfo.lunoPair,
+                        baseSymbol = pairInfo.baseSymbol,
+                        triggeredAtMyt = MytTimeUtils.formatDisplayMyt(nowMs),
+                        triggeredAtMs = nowMs,
+                        confidenceScore = analysis.confidenceScore,
+                        setup = analysis.setup,
+                        entryZoneMyr = levels.entryZoneMyr,
+                        entryRefPriceMyr = lastPrice,
+                        stopLossMyr = levels.stopLossMyr,
+                        tp1Myr = levels.tp1Myr,
+                        tp2Myr = levels.tp2Myr,
+                        invalidationMyr = levels.invalidationMyr,
+                        summaryBm = analysis.summaryBm,
+                        outcomeStatus = "OPEN"
+                    )
+                )
+            }
+        }
 
         // Dispatch notification if Grade A OR Emergency Event Trigger, respecting 2-hour cooldown & Strict Night Mode
         val canNotify = settings.notificationsEnabled &&

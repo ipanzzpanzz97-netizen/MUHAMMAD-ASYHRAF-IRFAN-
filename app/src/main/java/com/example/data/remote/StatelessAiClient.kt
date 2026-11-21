@@ -178,8 +178,8 @@ class StatelessAiClient {
 
         val bodyJson = JSONObject().apply {
             put("model", model.trim())
-            put("temperature", 0.05)
-            put("max_tokens", 850)
+            put("temperature", 0.1)
+            put("max_tokens", 350)
             put(
                 "messages",
                 JSONArray().apply {

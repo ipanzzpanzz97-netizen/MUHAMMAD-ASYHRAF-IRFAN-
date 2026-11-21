@@ -20,7 +20,7 @@ import kotlinx.serialization.json.jsonPrimitive
  */
 object AiJsonSanitizer {
 
-    private val THINK_BLOCK_REGEX = Regex("(?is)<think>.*?</think>")
+    private val THINK_BLOCK_REGEX = Regex("(?is)<think>.*?</think>|<think>.*?(?=\\{)")
     private val CODE_FENCE_REGEX = Regex("(?is)```(?:json)?\\s*|```")
     private val jsonParser = Json { ignoreUnknownKeys = true }
 

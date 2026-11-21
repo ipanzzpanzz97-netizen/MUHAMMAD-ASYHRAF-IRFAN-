@@ -43,4 +43,25 @@ interface ScanDao {
 
     @Query("DELETE FROM error_logs WHERE id NOT IN (SELECT id FROM error_logs ORDER BY epochMs DESC LIMIT 100)")
     suspend fun trimOldLogs()
+
+    @Query("SELECT * FROM signal_history ORDER BY triggeredAtMs DESC")
+    fun observeSignalHistory(): Flow<List<SignalHistoryEntity>>
+
+    @Query("SELECT * FROM signal_history WHERE pair = :pair ORDER BY triggeredAtMs DESC LIMIT 1")
+    suspend fun getLatestSignalForPair(pair: String): SignalHistoryEntity?
+
+    @Query("SELECT * FROM signal_history WHERE pair = :pair AND outcomeStatus = 'OPEN'")
+    suspend fun getOpenSignalsForPair(pair: String): List<SignalHistoryEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertSignalHistory(signal: SignalHistoryEntity)
+
+    @Query("UPDATE signal_history SET outcomeStatus = :outcomeStatus WHERE id = :id")
+    suspend fun updateSignalOutcome(id: Long, outcomeStatus: String)
+
+    @Query("DELETE FROM signal_history WHERE id = :id")
+    suspend fun deleteSignalById(id: Long)
+
+    @Query("DELETE FROM signal_history")
+    suspend fun clearSignalHistory()
 }

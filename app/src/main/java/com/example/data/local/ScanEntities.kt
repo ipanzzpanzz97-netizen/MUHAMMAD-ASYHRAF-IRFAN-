@@ -37,3 +37,22 @@ data class ErrorLogEntity(
     val pair: String,
     val message: String
 )
+
+@Entity(tableName = "signal_history")
+data class SignalHistoryEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val pair: String,
+    val baseSymbol: String,
+    val triggeredAtMyt: String,
+    val triggeredAtMs: Long,
+    val confidenceScore: Int,
+    val setup: String,
+    val entryZoneMyr: String,
+    val entryRefPriceMyr: Double,
+    val stopLossMyr: Double,
+    val tp1Myr: Double,
+    val tp2Myr: Double,
+    val invalidationMyr: Double,
+    val summaryBm: String,
+    val outcomeStatus: String = "OPEN" // OPEN, WIN_TP1, WIN_TP2, LOSS_SL
+)

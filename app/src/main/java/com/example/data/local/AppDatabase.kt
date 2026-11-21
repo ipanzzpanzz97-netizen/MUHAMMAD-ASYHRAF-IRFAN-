@@ -6,8 +6,13 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [CoinScanEntity::class, MacroSnapshotEntity::class, ErrorLogEntity::class],
-    version = 1,
+    entities = [
+        CoinScanEntity::class,
+        MacroSnapshotEntity::class,
+        ErrorLogEntity::class,
+        SignalHistoryEntity::class
+    ],
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
