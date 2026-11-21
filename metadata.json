@@ -1,0 +1,6 @@
+{
+  "name": "LunoIntel AI Scanner",
+  "description": "Enjin radar kripto MYR berketepatan tinggi & analisis kebarangkalian lantunan untuk pasaran Luno Malaysia.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
